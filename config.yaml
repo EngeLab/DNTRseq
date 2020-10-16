@@ -1,0 +1,70 @@
+cells_dna: cells_dna.tsv
+cells_rna: cells_rna.tsv
+cells_external: cells_external.tsv
+
+path: 
+  temp: /tmp
+  dnain: input/dna/fastq
+  dnaout: input/dna/aligned
+  rnain: input/rna/fastq
+  rnaout: input/rna/aligned
+  # Path to bin references, inspired by Ginkgo
+  dna_bin_resources: resources/genome_files
+  # Path to external sets used in paper
+  dnaext: input/external
+  dnadeep: input/dna
+  fragcov: out/fragcov
+  # Path to global functions in R
+  r_global: scripts/functions.R
+
+
+ref: 
+  fasta: /wrk/resources/genomes/hg38-iGenome-ERCC/hg38-iGenome-ERCC.fa
+  genes: /wrk/resources/genomes/hg38-iGenome-ERCC/hg38_RefSeq.bed
+  gene_extents: /wrk/resources/genomes/hg38-iGenome-ERCC/geneExtents_noERCC_sorted.bed
+  chr_list: resources/hg38.genome
+  chr_autosomal: /wrk/resources/dntr/production/resources/hg38_autosomal.bed
+  chr_autosomal_list: /wrk/resources/dntr/production/resources/hg38_autosomal.genome
+  centromeres: /wrk/resources/dntr/production/resources/hg38_centromeres.bed
+  # Encode consortium blacklisted regions
+  blacklist: /wrk/resources/dntr/production/resources/hg38_encode_blacklist_200505.bed
+  # FASTQ screen configuration
+  fastq_screen_config: resources/fastq_screen.conf
+
+dna:
+  # Which binsizes to run
+  binsizes: [500000]
+  # Minimum MAPQ score to use for binned reads
+  min_mapq: 20
+  # Maximum insert size for fragment analysis
+  max_insert: 1000
+  # Minimum read pairs / cell
+  min_count: 20000
+  # Max duplicate fraction
+  max_dup_frac: 0.15
+  # Read-length used for mappability track simulation
+  bin_readlength: 37
+  # Parameters for DNA copy segmentation
+  cbs_minwidth: 3
+  cbs_alpha: 0.001
+  cbs_undosplits: "none"
+  cbs_sdprune: 3
+  cbs_remove_outlier_bins: 0
+  # Ploidy analysis
+  ploidy_min_reads: 200000
+  # Deep sequenced cells
+  cells_deepseq: ["HCA00102D_A08X","HCA00102D_C03X","HCA00102D_E02X","HCA00102D_G16X","HCA00102D_O09X"]
+
+rna:
+  # Minimum reads per cell
+  min_count: 50000
+  # Lower quantile cutoff for QC
+  quantile_cut: 0.005
+  # Gene (log2) for quantile cutoff
+  quantile_gene: ACTB
+  tsne_perplexity: 30
+  meanexpr_cutoff: 0.3
+  disp_cutoff: 0.5
+
+external: 
+  run: false

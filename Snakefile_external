@@ -1,0 +1,251 @@
+# Collect and process external sets for DNTR-seq paper 2020
+import pandas as pd
+import os
+#------------------------------------------
+configfile: "config.yaml"
+cells_srr = pd.read_table(config["cells_external"], sep="\t", header=0)
+dnaext = config["path"]["dnaext"]
+binsizes = config["dna"]["binsizes"]
+
+lianti_ids = sorted(cells_srr['library_id'][(cells_srr.Processing == "LIANTI") & (cells_srr.In_paper == "T")])
+srr_ids = sorted(cells_srr['library_id'][(cells_srr.Processing == "Standard") & (cells_srr.In_paper == "T")])
+tenx_ids = sorted(cells_srr['library_id'][(cells_srr.Processing == "10x") & (cells_srr.In_paper == "T")])
+all_ids = lianti_ids + srr_ids + tenx_ids
+
+frags = expand(os.path.join(dnaext,"{srr}.frag.bed.gz"),srr=srr_ids + lianti_ids) + expand(os.path.join(dnaext,"10x/top10cells/{tenx}.frag.bed.gz"),tenx=tenx_ids)
+beds = [i.replace('frag.bed.gz', 'bed.gz') for i in frags]
+bams = [i.replace('frag.bed.gz', 'dedup.bam') for i in frags]
+fragcovs = [i.replace('frag.bed.gz', 'fragcov') for i in frags]
+bins = expand(os.path.join(dnaext,"{srr}-bincounts_{binsize}.tsv"),srr=srr_ids + lianti_ids,binsize=binsizes) + expand(os.path.join(dnaext,"10x/top10cells/{srr}-bincounts_{binsize}.tsv"),srr=tenx_ids,binsize=binsizes)
+
+#------------------------------------------ Main
+rule all: 
+	input: 
+		frags,
+		beds,
+		bams,
+		bins,
+		fragcovs,
+		"out/fragstats_external.tsv",
+		expand("out/external-bincounts-{binsize}.tsv", binsize=binsizes)
+
+# 1. Download specified SRR sets
+# 2. Align (with specific settings if needed)
+# 3. Bincount at 250kb + 500kb --> Used for GC plots
+# 4. Create fragment BEDs --> Used for fragment coverage plots
+# 5. Package output files in reasonable way for integration with in-house data
+
+#------------------------------------------ External DNA sets
+rule cutadapt:
+	'''
+	Trim adapter sequences and poor quality bases. Auto-detect adapter!
+	'''
+	input: 
+		lambda w: expand("{srr}_{read}.fastq.gz",srr={w.srr}, read=[1,2])
+	output: 
+		temp("{srr}_1_val_1.fq.gz"),
+		temp("{srr}_2_val_2.fq.gz")
+	wildcard_constraints: 
+		srr="^(?!.*SRR536537[4-6]).*" # Not LIANTI IDs
+	threads: 4
+	shell:
+		'''
+		outdir=$(dirname {output[0]})
+		trim_galore --paired --cores {threads} -q 20 -e 0.1 -o $outdir {input}
+		'''
+
+rule align_bwa: 
+	'''
+	Align paired DNA reads with bwa
+	'''
+	input: 
+		fq1="{srr}_1_val_1.fq.gz",
+		fq2="{srr}_2_val_2.fq.gz"
+	params:
+		rg="'@RG\\tID:{srr}\\tPL:ILLUMINA\\tPU:{srr}\\tLB:{srr}\\tSM:{srr}'",
+		ref=config["ref"]["fasta"]
+	output: 
+		temp("{srr}.sorted.bam")
+	wildcard_constraints:
+		srr="^(?!.*SRR536537[4-6]).*"
+	threads: 4
+	shell: 
+		'''
+		bwa mem -t {threads} -M -k 25 -R {params.rg} {params.ref} {input.fq1} {input.fq2} | \
+		samtools sort -@{threads} -O BAM -o {output} -
+		'''
+
+rule dedup:
+	input: "{srr}.sorted.bam"
+	output: 
+		bam="{srr}.dedup.bam",
+		qc="{srr}-picard-mark_duplicates.txt"
+	params:
+		tmp=config["path"]["temp"]
+	threads: 2
+	shell: 
+		'''
+		picard MarkDuplicates \
+		MAX_RECORDS_IN_RAM=5000000 \
+		TMP_DIR={params.tmp} \
+		INPUT={input} \
+		OUTPUT={output.bam} \
+		REMOVE_DUPLICATES=true \
+		VALIDATION_STRINGENCY=LENIENT \
+		METRICS_FILE={output.qc}
+		'''
+
+rule lianti_align:
+	'''
+	Alignment of LIANTI libraries, according to methods in doi:10.1126/science.aak9787
+	Requires additional non-conda tools adna (https://github.com/DReichLab/adna) and lianti (https://github.com/lh3/lianti)
+	'''
+	input: 
+		lambda wildcards: expand("{srr}_{read}.fastq.gz",srr={wildcards.srr}, read=[1,2])
+	output: temp("{srr}.mkdup.bam")
+	wildcard_constraints: 
+		srr=".*SRR536537[4-6]" # Only LIANTI cells need special processing
+		#srr="|".join(list(map('.*{0}'.format, lianti_ids))) # Generic way of achieving same result
+	threads: 8
+	params:
+		lianti="/home/vasilios/resources/lianti-lh3/lianti",
+		adna="/home/vasilios/resources/adna/adna-ldup",
+		ref=config["ref"]["fasta"]
+	shell:
+		'''
+		seqtk mergepe {input} | {params.lianti} trim - | bwa mem -Cpt{threads} {params.ref} - \
+		| samtools view -uS - | sambamba sort -q -m 16G -t {threads} --tmpdir=/tmp /dev/stdin -o /dev/stdout | {params.adna} -T - > {output}
+		'''
+
+rule lianti_dedup: 
+	input: "{srr}.mkdup.bam"
+	output: "{srr}.dedup.bam"
+	wildcard_constraints: 
+		srr=".*SRR536537[4-6]"
+	params: 
+		min_mapq=config["dna"]["min_mapq"]
+	threads: 4
+	shell: 
+		'''
+		sambamba view -F "not (duplicate) and mapping_quality >={params.min_mapq}" {input} > {output}
+		'''
+
+rule create_fragment_bed: 
+	'''
+	Constrained to HCT-deep + external sets
+	'''
+	input: "{srr}.dedup.bam"
+	output: "{srr}.frag.bed.gz"
+	params:
+		chr_auto=config["ref"]["chr_autosomal"],
+		min_mapq=config["dna"]["min_mapq"],
+		max_insert=config["dna"]["max_insert"]
+	threads: 4
+	shell: 
+		'''
+		sambamba sort -q -n -m 16G -t {threads} --tmpdir=/tmp -o /dev/stdout {input} | samtools view -L {params.chr_auto} -b -f 2 -F 256 - | bedtools bamtobed -bedpe -i stdin | \
+		awk -F'\t' -v mapq={params.min_mapq} -v ins={params.max_insert} '$1==$4 && ($6-$2)<ins && $8>=mapq{{OFS="\t"; print $1,$2,$6,$7,$8}}' | \
+		sort -S 16G -k1,1V -k2,2n | gzip -c > {output}
+		'''
+
+rule fragment_coverage: 
+	'''
+	Subsample in 10 fractions and calculate coverage
+	'''
+	input: "{srr}.frag.bed.gz"
+	output: 
+		unzip=temp("{srr}.frag.bed"),
+		done="{srr}.fragcov"
+	params: 
+		chrlist=config["ref"]["chr_autosomal_list"],
+		fragcov_dir=config["path"]["fragcov"],
+		sample=lambda w: os.path.basename(w.srr)
+	threads: 2
+	shell: 
+		'''
+		mkdir -vp {params.fragcov_dir}
+		sample={params.sample}
+		outdir={params.fragcov_dir}
+		beduz={output.unzip}
+		gunzip -c {input} > $beduz
+		stats=$(awk '{{sum+=($3-$2)}}END{{print sum, NR, (sum/NR)}}' $beduz)
+		totbp=$(echo $stats | cut -d' ' -f1)
+		tot=$(echo $stats | cut -d' ' -f2)
+		avg=$(echo $stats | cut -d' ' -f3)
+		echo "[$sample] avg=$avg; tot_frags=$tot; totbp=$totbp"
+		for bp in $(seq -f "%.0f" 5e7 1e8 2e9)
+		do 
+        	frac_bp=$(printf "%.5f" $(bc -l <<< "scale=5; $bp/$totbp"))
+        	n_frags=$(printf "%.0f" $(bc -l <<< "scale=2; $tot*$frac_bp"))
+        	outfile=$outdir/$sample.$bp
+        	if [[ $tot -lt $n_frags ]]; then
+        		echo -e "[$sample]\tNot enough fragments (total $tot) to sample $bp. Skipping..."
+                break
+        	elif [[ -s $outfile ]]; then
+        		echo -e "[$sample]\tSample already run at $frac ($bp bp). Skipping..."
+        	else 
+        		echo "[$sample] Running $bp bp (fraction $frac_bp)"
+        		export frac_bp
+        		time perl -ne 'print if (rand() < $ENV{{frac_bp}})' $beduz | bedtools genomecov -i stdin -g {params.chrlist} > $outfile
+        	fi
+        done
+        echo "[$sample] End with running coverage for complete file ($tot fragments; $totbp bp)"
+        outfile=$outdir/$sample.$totbp
+		[[ ! -s $outfile ]] && bedtools genomecov -i $beduz -g {params.chrlist} > $outfile
+		echo "[$sample] <<< Finished $sample @ $(date)"
+		echo -e "$sample\t$avg\t$tot\t$totbp" > {output.done}
+		'''
+
+rule collect_fragment_stats: 
+	input: fragcovs
+	output: "out/fragstats_external.tsv"
+	shell:  "cat {input} > {output}"
+
+
+rule lianti_flagstat: 
+	input: "{srr}.mkdup.bam"
+	output: "{srr}.mkdup.flagstat"
+	threads: 4
+	shell: 
+		'''
+		sambamba flagstat -t {threads} {input} > {output}
+		'''
+
+rule flagstat: 
+	input: "{srr}.dedup.bam"
+	output: "{srr}.flagstat"
+	threads: 4
+	shell: 
+		'''
+		sambamba flagstat -t {threads} {input} > {output}
+		'''
+
+rule create_bed:
+	input: "{srr}.dedup.bam"
+	output: "{srr}.bed.gz"
+	params: 
+		blacklist=config["ref"]["blacklist"],
+		min_mapq=config["dna"]["min_mapq"]
+	shell:
+		'''
+		bedtools bamtobed -i {input} | \
+		awk -F'\t' -v mapq={params.min_mapq} '$1~/^chr([0-9]+|[X,Y])$/ && $5>=mapq{{print}}' | \
+		bedtools intersect -a stdin -b {params.blacklist} -v | gzip -c > {output}
+		'''
+
+rule bincount: 
+	input: "{srr}.bed.gz"
+	output: "{srr}-bincounts_{binsize}.tsv"
+	params: 
+		bedbin=os.path.join(config["path"]["dna_bin_resources"],"variable_{binsize}_37_bwa.bed"),
+		cellid=lambda wildcards: os.path.basename(wildcards.srr) # Retrieve cellid from path for header
+	shell: 
+		'''
+		echo {params.cellid} > {output} # Set header with sample name
+		bedtools intersect -sorted -nonamecheck -F 0.5 -c -a {params.bedbin} -b {input} | cut -f4 >> {output}
+		'''
+
+rule concat_bincounts:
+	input: lambda wildcards: expand(os.path.join(dnaext,"{srr}-bincounts_{binsize}.tsv"),srr=srr_ids + lianti_ids,binsize=wildcards.binsize) + expand(os.path.join(dnaext,"10x/top10cells/{srr}-bincounts_{binsize}.tsv"),srr=tenx_ids,binsize=wildcards.binsize)
+	output: "out/external-bincounts-{binsize}.tsv"
+	script: "scripts/collect_bincounts.R"

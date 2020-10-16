@@ -1,0 +1,35 @@
+name: dntr-env
+channels:
+  - r
+  - conda-forge
+  - bioconda 
+dependencies:
+  - snakemake-minimal
+  - bwa=0.7.17
+  - cutadapt=2.6
+  - fastqc=0.11.9
+  - picard=2.22.0
+  - samtools=1.9
+  - sambamba=0.7.1
+  - fastq-screen=0.14.0
+  - trim-galore=0.6.5
+  - bedtools=2.29.2
+  - pandoc
+  - jinja2
+  - pandas
+  - libwebp=1.0.0
+  - r-tidyverse
+  - r-cowplot
+  - r-cba
+  - r-seurat
+  - r-r.utils
+  - r-polychrome
+  - r-sfsmisc
+  - r-devtools
+  - r-gridgraphics
+  - r-ggextra
+  - r-svglite
+  - bioconductor-dnacopy
+  - bioconductor-hmmcopy  
+  - bioconductor-limma
+  - bioconductor-deseq2
