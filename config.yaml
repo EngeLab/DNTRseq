@@ -21,14 +21,14 @@ path:
 ref: 
   fasta: /wrk/resources/genomes/hg38-iGenome-ERCC/hg38-iGenome-ERCC.fa
   genes: /wrk/resources/genomes/hg38-iGenome-ERCC/hg38_RefSeq.bed
-  gene_extents: /wrk/resources/genomes/hg38-iGenome-ERCC/geneExtents_noERCC_sorted.bed
+  gene_extents: resources/geneExtents_noERCC_sorted.bed
   chr_list: resources/hg38.genome
-  chr_autosomal: /wrk/resources/dntr/production/resources/hg38_autosomal.bed
-  chr_autosomal_list: /wrk/resources/dntr/production/resources/hg38_autosomal.genome
-  centromeres: /wrk/resources/dntr/production/resources/hg38_centromeres.bed
+  chr_autosomal: resources/hg38_autosomal.bed
+  chr_autosomal_list: resources/hg38_autosomal.genome
+  centromeres: resources/hg38_centromeres.bed
   # Encode consortium blacklisted regions
-  blacklist: /wrk/resources/dntr/production/resources/hg38_encode_blacklist_200505.bed
-  # FASTQ screen configuration
+  blacklist: resources/hg38_encode_blacklist_200505.bed
+  # FASTQ screen configuration (needs reference paths to be specified)
   fastq_screen_config: resources/fastq_screen.conf
 
 dna:
