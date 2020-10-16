@@ -3,5 +3,6 @@
 This repository contains scripts combined with [Snakemake](https://github.com/snakemake/snakemake) to process joint single-cell RNA and DNA libraries. 
 
 Manuscript: https://www.cell.com/molecular-cell/fulltext/S1097-2765(20)30655-9  
-Protocol: https://dx.doi.org/10.17504/protocols.io.bdthi6j6
+Protocol: https://dx.doi.org/10.17504/protocols.io.bdthi6j6   
+Raw data: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE144296 (awaiting approval)
 
